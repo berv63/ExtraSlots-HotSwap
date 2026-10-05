@@ -1,0 +1,13 @@
+# Build output
+bin/
+obj/
+dist/
+
+# Decompiled game code used for reference, not redistributable
+decomp/
+
+# Local notes and tooling
+CLAUDE.md
+.claude/
+.vs/
+*.user
