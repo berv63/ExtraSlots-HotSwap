@@ -32,7 +32,8 @@ mod manager such as Vortex.
 | Alt + Left Mouse | Previous loadout |
 | Alt + Right Mouse | Next loadout |
 
-- Gear in loadouts that are not active stays with your character and counts toward carry weight.
+- Gear in loadouts that are not active stays with your character and counts toward carry weight,
+  unless that loadout has a Megingjord equipped in it (see `Megingjord cancels loadout weight`).
 - Removing a loadout needs enough free inventory slots for its items.
 - The hotkeys work in the world and in the inventory screen. While Alt is held, attack and block
   are ignored so switching does not swing your weapon.
@@ -47,6 +48,9 @@ Settings live in `BepInEx\config\berv.ExtraSlotsHotSwap.cfg`.
 | General | Max loadouts | 8 | How many loadouts the `+` button will create (1 to 12) |
 | General | Show switch message | on | Show a message when the loadout is switched |
 | General | Drop all loadouts on death | off | Off: only the active loadout goes to the tombstone. On: the other loadouts drop too, in extra tombstones at the same spot |
+| General | Repair stored loadouts | on | The workstation repair button also repairs items of loadouts that are not active |
+| General | Upgrade stored loadouts | on | The workstation upgrade tab also lists items of loadouts that are not active. Needs one free inventory slot |
+| General | Megingjord cancels loadout weight | on | A loadout with a Megingjord equipped in it weighs nothing, active or not. Each loadout needs its own belt |
 | General | Share ammo between loadouts | off | Ammo slots stay in place when switching |
 | General | Share food between loadouts | off | Food slots stay in place when switching |
 | General | Share quick slots between loadouts | off | Quick slots stay in place when switching |

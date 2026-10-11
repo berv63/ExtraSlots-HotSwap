@@ -343,6 +343,113 @@ namespace ExtraSlotsHotSwap
             HotSwapPlugin.LogInfo($"Dropped {dropped} stashed item(s) on death");
         }
 
+        // Vanilla repair only looks at the player inventory, this puts stashed items into the same queue
+        internal static void AddStashedWornItems(Player player, List<ItemDrop.ItemData> worn)
+        {
+            if (!IsReady(player))
+                return;
+
+            foreach (Loadout loadout in loadouts)
+                foreach (StoredItem stored in loadout.Items)
+                {
+                    ItemDrop.ItemData item = stored.Item;
+                    if (item?.m_shared != null && item.m_shared.m_useDurability && item.m_durability < item.GetMaxDurability())
+                        worn.Add(item);
+                }
+        }
+
+        // Set while the crafting panel collects items for its upgrade list
+        internal static bool listingUpgrades;
+
+        // Same filter as Inventory.GetAllItems by name
+        internal static void AddStashedItemsByName(Player player, string name, List<ItemDrop.ItemData> items)
+        {
+            if (!IsReady(player))
+                return;
+
+            foreach (Loadout loadout in loadouts)
+                foreach (StoredItem stored in loadout.Items)
+                {
+                    ItemDrop.ItemData item = stored.Item;
+                    if (item?.m_shared != null && item.m_shared.m_name == name && item.m_worldLevel >= Game.m_worldLevel)
+                        items.Add(item);
+                }
+        }
+
+        private sealed class PendingUpgrade
+        {
+            internal Loadout Loadout;
+            internal int Index;
+            internal StoredItem Stored;
+            internal HashSet<ItemDrop.ItemData> Before;
+        }
+
+        private static PendingUpgrade pendingUpgrade;
+
+        // Vanilla upgrade replaces an item of the player inventory, so a stashed item is lent to the inventory while it runs
+        internal static void BeginStashedUpgrade(Player player, ItemDrop.ItemData item)
+        {
+            pendingUpgrade = null;
+            if (item == null || !IsReady(player) || player.m_inventory.ContainsItem(item))
+                return;
+
+            foreach (Loadout loadout in loadouts)
+            {
+                int index = loadout.Items.FindIndex(stored => ReferenceEquals(stored.Item, item));
+                if (index < 0)
+                    continue;
+
+                Inventory inventory = player.m_inventory;
+                List<Vector2i> free = GetFreeRegularPositions(inventory);
+                if (free.Count == 0)
+                {
+                    Message(player, "Free up one inventory slot to upgrade gear of a stored loadout");
+                    return;
+                }
+
+                pendingUpgrade = new PendingUpgrade
+                {
+                    Loadout = loadout,
+                    Index = index,
+                    Stored = loadout.Items[index],
+                    Before = new HashSet<ItemDrop.ItemData>(inventory.m_inventory)
+                };
+
+                loadout.Items.RemoveAt(index);
+                Place(inventory, item, free[0]);
+                return;
+            }
+        }
+
+        internal static void EndStashedUpgrade(Player player)
+        {
+            PendingUpgrade pending = pendingUpgrade;
+            pendingUpgrade = null;
+            if (pending == null)
+                return;
+
+            Inventory inventory = player.m_inventory;
+            ItemDrop.ItemData original = pending.Stored.Item;
+
+            // The upgraded item is a new one. The original is still there if nothing was crafted, neither is if an upgrader broke it.
+            ItemDrop.ItemData result = inventory.m_inventory.Contains(original)
+                ? original
+                : inventory.m_inventory.FirstOrDefault(item => !pending.Before.Contains(item) && item.m_shared.m_name == original.m_shared.m_name);
+
+            if (result != null)
+            {
+                player.UnequipItem(result, triggerEquipEffects: false);
+                if (inventory.m_inventory.Remove(result))
+                {
+                    result.m_equipped = false;
+                    pending.Loadout.Items.Insert(Math.Min(pending.Index, pending.Loadout.Items.Count), new StoredItem(pending.Stored.SlotID, pending.Stored.Equipped, result));
+                }
+            }
+
+            UpdateStashedWeight();
+            inventory.Changed();
+        }
+
         private static bool CanSwitch(Player player)
         {
             if (player.IsDead() || player.IsTeleporting() || player.InAttack() || player.InDodge())
@@ -444,6 +551,11 @@ namespace ExtraSlotsHotSwap
             // Calculated from shared data as ItemData.GetWeight is altered by Extra Slots depending on item grid position
             stashedWeight = 0f;
             foreach (Loadout loadout in loadouts)
+            {
+                // A loadout stashed with its carry weight belt worn weighs nothing
+                if (HotSwapPlugin.beltCancelsWeight.Value && loadout.Items.Any(stored => stored.Equipped && IsCarryBelt(stored.Item)))
+                    continue;
+
                 foreach (StoredItem stored in loadout.Items)
                 {
                     ItemDrop.ItemData item = stored.Item;
@@ -456,6 +568,48 @@ namespace ExtraSlotsHotSwap
 
                     stashedWeight += weight;
                 }
+            }
+        }
+
+        // Set while the total weight of the player inventory is calculated with a carry weight belt worn
+        internal static bool weightless;
+        private static bool beltWorn;
+
+        // Only covers the active loadout, a stashed loadout is covered by a belt of its own
+        internal static bool HasWornCarryBelt(Player player)
+        {
+            if (!HotSwapPlugin.beltCancelsWeight.Value)
+                return false;
+
+            foreach (ItemDrop.ItemData item in player.m_inventory.m_inventory)
+                if (item.m_equipped && ESAPI.IsGridPositionASlot(item.m_gridPos) && IsCarryBelt(item))
+                    return true;
+
+            return false;
+        }
+
+        internal static void OnBeltSettingChanged()
+        {
+            UpdateStashedWeight();
+            if (owner)
+                owner.m_inventory.UpdateTotalWeight();
+        }
+
+        // Equipping does not change the inventory, so the weight is recalculated when the belt is put on or taken off
+        internal static void UpdateCarryBelt(Player player)
+        {
+            bool worn = HasWornCarryBelt(player);
+            if (worn == beltWorn)
+                return;
+
+            beltWorn = worn;
+            player.m_inventory.UpdateTotalWeight();
+        }
+
+        private static bool IsCarryBelt(ItemDrop.ItemData item)
+        {
+            return item?.m_shared != null
+                && (item.m_shared.m_name == "$item_beltstrength" || item.m_shared.m_equipStatusEffect is SE_Stats stats && stats.m_addMaxCarryWeight > 0f);
         }
 
         private static void Message(Player player, string text) => player.Message(MessageHud.MessageType.TopLeft, text);

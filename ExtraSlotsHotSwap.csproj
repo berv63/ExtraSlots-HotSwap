@@ -4,7 +4,7 @@
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>ExtraSlotsHotSwap</AssemblyName>
     <RootNamespace>ExtraSlotsHotSwap</RootNamespace>
-    <Version>0.0.6</Version>
+    <Version>0.0.10</Version>
     <LangVersion>10.0</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

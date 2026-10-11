@@ -15,7 +15,7 @@ namespace ExtraSlotsHotSwap
     {
         public const string pluginID = "berv.ExtraSlotsHotSwap";
         public const string pluginName = "Extra Slots HotSwap";
-        public const string pluginVersion = "0.0.6";
+        public const string pluginVersion = "0.0.10";
 
         internal static HotSwapPlugin instance;
         internal static ManualLogSource logger;
@@ -25,6 +25,9 @@ namespace ExtraSlotsHotSwap
         internal static ConfigEntry<int> maxLoadouts;
         internal static ConfigEntry<bool> showSwitchMessage;
         internal static ConfigEntry<bool> dropAllLoadoutsOnDeath;
+        internal static ConfigEntry<bool> repairStoredLoadouts;
+        internal static ConfigEntry<bool> upgradeStoredLoadouts;
+        internal static ConfigEntry<bool> beltCancelsWeight;
         internal static ConfigEntry<bool> shareAmmo;
         internal static ConfigEntry<bool> shareFood;
         internal static ConfigEntry<bool> shareQuickSlots;
@@ -43,6 +46,9 @@ namespace ExtraSlotsHotSwap
             maxLoadouts = Config.Bind("General", "Max loadouts", 8, new ConfigDescription("Maximum amount of loadouts the + button will create.", new AcceptableValueRange<int>(1, 12)));
             showSwitchMessage = Config.Bind("General", "Show switch message", true, "Show a message in the top left corner when the loadout is switched.");
             dropAllLoadoutsOnDeath = Config.Bind("General", "Drop all loadouts on death", false, "Disabled: only the active loadout goes to the tombstone, other loadouts stay with the character. Enabled: items of all other loadouts are dropped on death as well, in extra tombstones at the same spot. Recovered items return to the inventory, not to their loadouts.");
+            repairStoredLoadouts = Config.Bind("General", "Repair stored loadouts", true, "The repair button of a workstation also repairs items of loadouts that are not active, one item per click like the items you carry. The usual station type and level rules apply.");
+            upgradeStoredLoadouts = Config.Bind("General", "Upgrade stored loadouts", true, "The upgrade tab of a workstation also lists items of loadouts that are not active. An upgraded item stays in its loadout. Needs one free inventory slot while the upgrade is made.");
+            beltCancelsWeight = Config.Bind("General", "Megingjord cancels loadout weight", true, "A loadout that has a Megingjord (or another belt that adds carry weight) equipped in it weighs nothing, whether it is the active loadout or not. Each loadout needs a belt of its own, loadouts without one keep their weight. Items in the regular inventory keep their weight.");
             shareAmmo = Config.Bind("General", "Share ammo between loadouts", false, "Disabled: every loadout holds its own ammo. Enabled: items in the ammo slots stay in place when the loadout is switched. Ammo already stored in another loadout goes to the inventory when that loadout is next switched to, if its slot is taken.");
             shareFood = Config.Bind("General", "Share food between loadouts", false, "Disabled: every loadout holds its own food. Enabled: items in the food slots stay in place when the loadout is switched. Food already stored in another loadout goes to the inventory when that loadout is next switched to, if its slot is taken.");
             shareQuickSlots = Config.Bind("General", "Share quick slots between loadouts", false, "Disabled: every loadout holds its own quick slot items, such as potions. Enabled: items in the quick slots stay in place when the loadout is switched, whatever they are. Items already stored in another loadout go to the inventory when that loadout is next switched to, if their slot is taken.");
@@ -55,6 +61,7 @@ namespace ExtraSlotsHotSwap
             barOffset = Config.Bind("Panel", "Loadout bar offset", new Vector2(0f, 10f), "Offset of the loadout bar from the bottom left corner of the Extra Slots equipment panel. X moves it right, Y moves it down.");
             buttonSize = Config.Bind("Panel", "Button size", 36f, new ConfigDescription("Size of the loadout buttons.", new AcceptableValueRange<float>(20f, 64f)));
 
+            beltCancelsWeight.SettingChanged += (sender, args) => Loadouts.OnBeltSettingChanged();
             barOffset.SettingChanged += (sender, args) => LoadoutBar.MarkDirty();
             buttonSize.SettingChanged += (sender, args) => LoadoutBar.MarkDirty();
 
@@ -69,6 +76,7 @@ namespace ExtraSlotsHotSwap
 
             Loadouts.EnsureLoaded(player);
             LoadoutBar.Update(player);
+            Loadouts.UpdateCarryBelt(player);
 
             if (!Loadouts.IsReady(player) || Loadouts.Count < 2)
                 return;
@@ -136,6 +144,12 @@ namespace ExtraSlotsHotSwap
         [HarmonyPatch(typeof(Inventory), nameof(Inventory.UpdateTotalWeight))]
         private static class Inventory_UpdateTotalWeight_AddStashedLoadouts
         {
+            private static void Prefix(Inventory __instance)
+            {
+                Player player = Player.m_localPlayer;
+                Loadouts.weightless = player && __instance == player.m_inventory && Loadouts.HasWornCarryBelt(player);
+            }
+
             private static void Postfix(Inventory __instance)
             {
                 Player player = Player.m_localPlayer;
@@ -143,6 +157,23 @@ namespace ExtraSlotsHotSwap
                     return;
 
                 __instance.m_totalWeight += Loadouts.GetStashedWeight(player);
+            }
+
+            private static System.Exception Finalizer(System.Exception __exception)
+            {
+                Loadouts.weightless = false;
+                return __exception;
+            }
+        }
+
+        // Items in the Extra Slots panel weigh nothing in the total while a carry weight belt is worn
+        [HarmonyPatch(typeof(ItemDrop.ItemData), nameof(ItemDrop.ItemData.GetWeight))]
+        private static class ItemData_GetWeight_BeltCancelsWeight
+        {
+            private static void Postfix(ItemDrop.ItemData __instance, ref float __result)
+            {
+                if (Loadouts.weightless && ExtraSlots.API.IsGridPositionASlot(__instance.m_gridPos))
+                    __result = 0f;
             }
         }
 
@@ -168,6 +199,65 @@ namespace ExtraSlotsHotSwap
             }
 
             private static bool Prefix() => !ShouldSuppressInventoryClick();
+        }
+
+        // Only the repair button of the crafting panel asks for worn items
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.GetWornItems))]
+        private static class Inventory_GetWornItems_AddStashedLoadouts
+        {
+            private static void Postfix(Inventory __instance, List<ItemDrop.ItemData> worn)
+            {
+                Player player = Player.m_localPlayer;
+                if (!repairStoredLoadouts.Value || !player || __instance != player.m_inventory)
+                    return;
+
+                Loadouts.AddStashedWornItems(player, worn);
+            }
+        }
+
+        [HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.UpdateRecipeList))]
+        private static class InventoryGui_UpdateRecipeList_ListStashedLoadouts
+        {
+            private static void Prefix() => Loadouts.listingUpgrades = true;
+
+            private static System.Exception Finalizer(System.Exception __exception)
+            {
+                Loadouts.listingUpgrades = false;
+                return __exception;
+            }
+        }
+
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.GetAllItems), typeof(string), typeof(List<ItemDrop.ItemData>))]
+        private static class Inventory_GetAllItems_AddStashedLoadouts
+        {
+            private static void Postfix(Inventory __instance, string name, List<ItemDrop.ItemData> items)
+            {
+                Player player = Player.m_localPlayer;
+                if (!Loadouts.listingUpgrades || !upgradeStoredLoadouts.Value || !player || __instance != player.m_inventory)
+                    return;
+
+                Loadouts.AddStashedItemsByName(player, name, items);
+            }
+        }
+
+        [HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.DoCrafting))]
+        private static class InventoryGui_DoCrafting_UpgradeStashedItem
+        {
+            [HarmonyPriority(Priority.First)]
+            private static void Prefix(InventoryGui __instance, Player player)
+            {
+                if (upgradeStoredLoadouts.Value && player && player == Player.m_localPlayer)
+                    Loadouts.BeginStashedUpgrade(player, __instance.m_craftUpgradeItem);
+            }
+
+            [HarmonyPriority(Priority.Last)]
+            private static System.Exception Finalizer(Player player, System.Exception __exception)
+            {
+                if (player)
+                    Loadouts.EndStashedUpgrade(player);
+
+                return __exception;
+            }
         }
 
         [HarmonyPatch(typeof(Player), nameof(Player.CreateTombStone))]
