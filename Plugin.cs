@@ -15,7 +15,7 @@ namespace ExtraSlotsHotSwap
     {
         public const string pluginID = "berv.ExtraSlotsHotSwap";
         public const string pluginName = "Extra Slots HotSwap";
-        public const string pluginVersion = "0.0.10";
+        public const string pluginVersion = "0.0.12";
 
         internal static HotSwapPlugin instance;
         internal static ManualLogSource logger;
@@ -147,7 +147,7 @@ namespace ExtraSlotsHotSwap
             private static void Prefix(Inventory __instance)
             {
                 Player player = Player.m_localPlayer;
-                Loadouts.weightless = player && __instance == player.m_inventory && Loadouts.HasWornCarryBelt(player);
+                Loadouts.weightless = player && __instance == player.m_inventory && Loadouts.BeginWeightCalculation(player);
             }
 
             private static void Postfix(Inventory __instance)

@@ -221,6 +221,8 @@ namespace ExtraSlotsHotSwap
             foreach (ItemDrop.ItemData item in toEquip)
                 player.EquipItem(item, triggerEquipEffects: false);
 
+            inventory.UpdateTotalWeight();
+
             LoadoutBar.MarkDirty();
 
             string switched = isActive ? $", switched to loadout {active + 1}" : "";
@@ -268,6 +270,9 @@ namespace ExtraSlotsHotSwap
 
             foreach (ItemDrop.ItemData item in toEquip)
                 player.EquipItem(item, triggerEquipEffects: false);
+
+            // The weight above was calculated before the belt was back on, the game must never see that value
+            inventory.UpdateTotalWeight();
 
             LoadoutBar.MarkDirty();
 
@@ -582,10 +587,17 @@ namespace ExtraSlotsHotSwap
                 return false;
 
             foreach (ItemDrop.ItemData item in player.m_inventory.m_inventory)
-                if (item.m_equipped && ESAPI.IsGridPositionASlot(item.m_gridPos) && IsCarryBelt(item))
+                if (ESAPI.IsGridPositionASlot(item.m_gridPos) && IsCarryBelt(item) && (item.m_equipped || player.IsItemEquiped(item)))
                     return true;
 
             return false;
+        }
+
+        // Called at the start of every weight calculation of the player inventory
+        internal static bool BeginWeightCalculation(Player player)
+        {
+            beltWorn = HasWornCarryBelt(player);
+            return beltWorn;
         }
 
         internal static void OnBeltSettingChanged()
@@ -595,15 +607,12 @@ namespace ExtraSlotsHotSwap
                 owner.m_inventory.UpdateTotalWeight();
         }
 
-        // Equipping does not change the inventory, so the weight is recalculated when the belt is put on or taken off
+        // Equipping does not change the inventory, so the weight is recalculated when the belt state differs from the one
+        // the last calculation was made with. A loadout switch calculates the weight before its belt is put back on.
         internal static void UpdateCarryBelt(Player player)
         {
-            bool worn = HasWornCarryBelt(player);
-            if (worn == beltWorn)
-                return;
-
-            beltWorn = worn;
-            player.m_inventory.UpdateTotalWeight();
+            if (HasWornCarryBelt(player) != beltWorn)
+                player.m_inventory.UpdateTotalWeight();
         }
 
         private static bool IsCarryBelt(ItemDrop.ItemData item)
